@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { createHtmlArtifactManifest, inferLegacyManifest } from '../artifacts/manifest';
 import { createArtifactParser } from '../artifacts/parser';
 import { useT } from '../i18n';
@@ -105,6 +112,39 @@ interface Props {
 }
 
 let liveArtifactEventSequence = 0;
+const CHAT_PANEL_WIDTH_STORAGE_KEY = 'open-design.project.chatPanelWidth';
+const DEFAULT_CHAT_PANEL_WIDTH = 460;
+const MIN_CHAT_PANEL_WIDTH = 320;
+const MAX_CHAT_PANEL_WIDTH = 720;
+
+function clampChatPanelWidth(width: number): number {
+  return Math.min(MAX_CHAT_PANEL_WIDTH, Math.max(MIN_CHAT_PANEL_WIDTH, Math.round(width)));
+}
+
+function readSavedChatPanelWidth(): number {
+  if (typeof window === 'undefined') return DEFAULT_CHAT_PANEL_WIDTH;
+  try {
+    const raw = window.localStorage.getItem(CHAT_PANEL_WIDTH_STORAGE_KEY);
+    const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+    return Number.isFinite(parsed)
+      ? clampChatPanelWidth(parsed)
+      : DEFAULT_CHAT_PANEL_WIDTH;
+  } catch {
+    return DEFAULT_CHAT_PANEL_WIDTH;
+  }
+}
+
+function saveChatPanelWidth(width: number): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      CHAT_PANEL_WIDTH_STORAGE_KEY,
+      String(clampChatPanelWidth(width)),
+    );
+  } catch {
+    // localStorage can be unavailable in hardened browser contexts.
+  }
+}
 
 function appendLiveArtifactEventItem(
   prev: LiveArtifactEventItem[],
@@ -176,6 +216,9 @@ export function ProjectView({
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [liveArtifacts, setLiveArtifacts] = useState<LiveArtifactSummary[]>([]);
   const [liveArtifactEvents, setLiveArtifactEvents] = useState<LiveArtifactEventItem[]>([]);
+  const [chatPanelWidth, setChatPanelWidth] = useState(readSavedChatPanelWidth);
+  const [resizingChatPanel, setResizingChatPanel] = useState(false);
+  const splitRef = useRef<HTMLDivElement | null>(null);
   // The persisted set of open tabs + active tab. Persisted via PUT on every
   // change; loaded once when the project mounts.
   const [openTabsState, setOpenTabsState] = useState<OpenTabsState>({
@@ -1412,6 +1455,38 @@ export function ProjectView({
     [skills, project.skillId],
   );
 
+  const handleChatResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const split = splitRef.current;
+    if (!split) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setResizingChatPanel(true);
+
+    const splitLeft = split.getBoundingClientRect().left;
+    let finalWidth = chatPanelWidth;
+    const updateWidth = (clientX: number) => {
+      finalWidth = clampChatPanelWidth(clientX - splitLeft);
+      setChatPanelWidth(finalWidth);
+    };
+    updateWidth(event.clientX);
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      updateWidth(moveEvent.clientX);
+    };
+    const handlePointerUp = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+      setResizingChatPanel(false);
+      saveChatPanelWidth(finalWidth);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp, { once: true });
+    window.addEventListener('pointercancel', handlePointerUp, { once: true });
+  }, [chatPanelWidth]);
+
   // Hand the pending prompt to ChatPane exactly once. We snapshot the value
   // into local state on mount so it survives the ChatPane remount triggered
   // when `activeConversationId` resolves from `null` to a real id (the
@@ -1472,7 +1547,11 @@ export function ProjectView({
             <span className="meta" data-testid="project-meta">{projectMeta}</span>
         </div>
       </AppChromeHeader>
-      <div className="split">
+      <div
+        ref={splitRef}
+        className={`split${resizingChatPanel ? ' is-resizing-chat' : ''}`}
+        style={{ gridTemplateColumns: `${chatPanelWidth}px 8px minmax(0, 1fr)` }}
+      >
         <ChatPane
           // The conversation id is part of the key so switching conversations
           // resets internal scroll/draft state inside ChatPane and ChatComposer.
@@ -1513,6 +1592,14 @@ export function ProjectView({
           onProjectMetadataChange={(metadata) => {
             onProjectChange({ ...project, metadata });
           }}
+        />
+        <div
+          className="split-resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize chat panel"
+          title="Resize chat panel"
+          onPointerDown={handleChatResizePointerDown}
         />
         <FileWorkspace
           projectId={project.id}

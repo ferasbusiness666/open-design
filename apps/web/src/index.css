@@ -580,17 +580,51 @@ code {
 /* -------- Split / panes -------------------------------------------- */
 .split {
   display: grid;
-  grid-template-columns: minmax(380px, 460px) minmax(0, 1fr);
+  grid-template-columns: 460px 8px minmax(0, 1fr);
   min-height: 0;
+}
+.split.is-resizing-chat {
+  cursor: col-resize;
+  user-select: none;
+}
+.split.is-resizing-chat iframe {
+  pointer-events: none;
 }
 .pane {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid var(--border);
   background: var(--bg-panel);
 }
-.pane:last-child { border-right: none; }
+.split-resize-handle {
+  width: 8px;
+  min-width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 3px,
+      var(--border) 3px,
+      var(--border) 5px,
+      transparent 5px
+    );
+  transition: background 120ms ease;
+  touch-action: none;
+}
+.split-resize-handle:hover,
+.split.is-resizing-chat .split-resize-handle {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 16%, transparent) 0,
+      color-mix(in srgb, var(--accent) 16%, transparent) 3px,
+      var(--accent) 3px,
+      var(--accent) 5px,
+      color-mix(in srgb, var(--accent) 16%, transparent) 5px
+    );
+}
 
 /* -------- Chat sticky header --------------------------------------- */
 .chat-header {
