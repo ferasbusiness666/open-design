@@ -580,7 +580,7 @@ code {
 /* -------- Split / panes -------------------------------------------- */
 .split {
   display: grid;
-  grid-template-columns: 460px 8px minmax(0, 1fr);
+  grid-template-columns: 460px 8px minmax(400px, 1fr);
   min-height: 0;
 }
 .split.is-resizing-chat {
@@ -614,6 +614,7 @@ code {
   touch-action: none;
 }
 .split-resize-handle:hover,
+.split-resize-handle:focus-visible,
 .split.is-resizing-chat .split-resize-handle {
   background:
     linear-gradient(
@@ -624,6 +625,10 @@ code {
       var(--accent) 5px,
       color-mix(in srgb, var(--accent) 16%, transparent) 5px
     );
+}
+.split-resize-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 /* -------- Chat sticky header --------------------------------------- */
