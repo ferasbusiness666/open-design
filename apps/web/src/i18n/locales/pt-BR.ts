@@ -404,6 +404,7 @@ export const ptBR: Dict = {
 
   'project.backToProjects': 'Voltar aos projetos',
   'project.metaFreeform': 'livre',
+  'project.resizeChatPanel': 'Redimensionar painel de chat',
   'chat.tabChat': 'Chat',
   'chat.tabComments': 'Comentários',
   'chat.commentsSoon': 'Comentários — em breve',

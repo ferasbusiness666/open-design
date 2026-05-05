@@ -404,6 +404,7 @@ export const ru: Dict = {
 
   'project.backToProjects': 'Назад к проектам',
   'project.metaFreeform': 'произвольная форма',
+  'project.resizeChatPanel': 'Изменить размер панели чата',
   'chat.tabChat': 'Чат',
   'chat.tabComments': 'Комментарии',
   'chat.commentsSoon': 'Комментарии — скоро',

@@ -394,6 +394,7 @@ export const ar: Dict = {
 
   'project.backToProjects': 'العودة للمشاريع',
   'project.metaFreeform': 'شكل حر',
+  'project.resizeChatPanel': 'تغيير حجم لوحة الدردشة',
   'chat.tabChat': 'دردشة',
   'chat.tabComments': 'تعليقات',
   'chat.commentsSoon': 'التعليقات - قريباً',

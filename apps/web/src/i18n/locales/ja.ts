@@ -347,6 +347,7 @@ export const ja: Dict = {
 
   'project.backToProjects': 'プロジェクトに戻る',
   'project.metaFreeform': 'フリーフォーム',
+  'project.resizeChatPanel': 'チャットパネルのサイズを変更',
   'chat.tabChat': 'チャット',
   'chat.tabComments': 'コメント',
   'chat.commentsSoon': 'コメント — 近日公開',

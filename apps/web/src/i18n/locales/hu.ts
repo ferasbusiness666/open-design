@@ -394,6 +394,7 @@ export const hu: Dict = {
 
   'project.backToProjects': 'Vissza a projektekhez',
   'project.metaFreeform': 'szabad formátum',
+  'project.resizeChatPanel': 'Csevegőpanel átméretezése',
   'chat.tabChat': 'Csevegés',
   'chat.tabComments': 'Megjegyzések',
   'chat.commentsSoon': 'Megjegyzések — hamarosan',

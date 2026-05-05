@@ -394,6 +394,7 @@ export const fr: Dict = {
 
   'project.backToProjects': 'Retour aux projets',
   'project.metaFreeform': 'libre',
+  'project.resizeChatPanel': 'Redimensionner le panneau de chat',
   'chat.tabChat': 'Chat',
   'chat.tabComments': 'Commentaires',
   'chat.commentsSoon': 'Commentaires — bientôt disponible',

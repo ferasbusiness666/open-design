@@ -242,7 +242,12 @@ export function ProjectView({
   const preferredChatPanelWidthRef = useRef(chatPanelWidth);
   const resizeStartPreferredWidthRef = useRef(chatPanelWidth);
   const chatPanelMaxWidthRef = useRef(chatPanelMaxWidth);
-  const resizeStateRef = useRef<{ rect: DOMRect; isRtl: boolean } | null>(null);
+  const resizeStateRef = useRef<{
+    startClientX: number;
+    startWidth: number;
+    isRtl: boolean;
+    hasMoved: boolean;
+  } | null>(null);
   const pointerCleanupRef = useRef<(() => void) | null>(null);
   const pointerFrameRef = useRef<number | null>(null);
   const pendingPointerClientXRef = useRef<number | null>(null);
@@ -1481,6 +1486,7 @@ export function ProjectView({
     () => skills.find((s) => s.id === project.skillId)?.mode === 'deck',
     [skills, project.skillId],
   );
+  const chatResizeLabel = t('project.resizeChatPanel');
 
   const renderPreferredChatPanelWidth = useCallback((
     preferredWidth: number,
@@ -1558,9 +1564,10 @@ export function ProjectView({
     const updateWidthFromClientX = (clientX: number) => {
       const state = resizeStateRef.current;
       if (!state) return;
-      const rawWidth = state.isRtl
-        ? state.rect.right - clientX
-        : clientX - state.rect.left;
+      const delta = clientX - state.startClientX;
+      if (delta === 0 && !state.hasMoved) return;
+      state.hasMoved = true;
+      const rawWidth = state.startWidth + (state.isRtl ? -delta : delta);
       applyChatPanelWidth(rawWidth);
     };
 
@@ -1575,10 +1582,11 @@ export function ProjectView({
     };
 
     resizeStateRef.current = {
-      rect: split.getBoundingClientRect(),
+      startClientX: event.clientX,
+      startWidth: chatPanelWidthRef.current,
       isRtl: window.getComputedStyle(split).direction === 'rtl',
+      hasMoved: false,
     };
-    updateWidthFromClientX(event.clientX);
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
       pendingPointerClientXRef.current = moveEvent.clientX;
@@ -1751,12 +1759,12 @@ export function ProjectView({
           className="split-resize-handle"
           role="separator"
           aria-orientation="vertical"
-          aria-label="Resize chat panel"
+          aria-label={chatResizeLabel}
           aria-valuemin={MIN_CHAT_PANEL_WIDTH}
           aria-valuemax={chatPanelMaxWidth}
           aria-valuenow={chatPanelWidth}
           tabIndex={0}
-          title="Resize chat panel"
+          title={chatResizeLabel}
           onPointerDown={handleChatResizePointerDown}
           onKeyDown={handleChatResizeKeyDown}
           onBlur={handleChatResizeBlur}

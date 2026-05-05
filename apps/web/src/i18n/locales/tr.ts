@@ -393,6 +393,7 @@ export const tr: Dict = {
 
   'project.backToProjects': 'Projelere dön',
   'project.metaFreeform': 'serbest stil',
+  'project.resizeChatPanel': 'Sohbet panelini yeniden boyutlandır',
   'chat.tabChat': 'Sohbet',
   'chat.tabComments': 'Yorumlar',
   'chat.commentsSoon': 'Yorumlar — yakında',

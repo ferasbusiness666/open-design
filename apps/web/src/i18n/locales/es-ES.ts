@@ -349,6 +349,7 @@ export const esES: Dict = {
 
   'project.backToProjects': 'Volver a los proyectos',
   'project.metaFreeform': 'estilo libre',
+  'project.resizeChatPanel': 'Redimensionar panel de chat',
   'chat.tabChat': 'Chat',
   'chat.tabComments': 'Comentarios',
   'chat.commentsSoon': 'Comentarios — próximamente',

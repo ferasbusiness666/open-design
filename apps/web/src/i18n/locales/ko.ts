@@ -394,6 +394,7 @@ export const ko: Dict = {
 
   'project.backToProjects': '프로젝트 목록으로 돌아가기',
   'project.metaFreeform': '자유 양식',
+  'project.resizeChatPanel': '채팅 패널 크기 조절',
   'chat.tabChat': '채팅',
   'chat.tabComments': '댓글',
   'chat.commentsSoon': '댓글 — 곧 지원될 예정입니다.',

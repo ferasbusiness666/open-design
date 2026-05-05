@@ -399,6 +399,7 @@ export const zhCN: Dict = {
 
   'project.backToProjects': '返回项目列表',
   'project.metaFreeform': '自由设计',
+  'project.resizeChatPanel': '调整聊天面板大小',
   'chat.tabChat': '对话',
   'chat.tabComments': '评论',
   'chat.commentsSoon': '评论 — 即将上线',

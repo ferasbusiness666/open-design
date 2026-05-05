@@ -405,6 +405,7 @@ export const en: Dict = {
 
   'project.backToProjects': 'Back to projects',
   'project.metaFreeform': 'freeform',
+  'project.resizeChatPanel': 'Resize chat panel',
   'chat.tabChat': 'Chat',
   'chat.tabComments': 'Comments',
   'chat.commentsSoon': 'Comments — coming soon',

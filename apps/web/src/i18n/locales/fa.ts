@@ -405,6 +405,7 @@ export const fa: Dict = {
 
   'project.backToProjects': 'بازگشت به پروژه‌ها',
   'project.metaFreeform': 'آزاد',
+  'project.resizeChatPanel': 'تغییر اندازه پنل چت',
   'chat.tabChat': 'چت',
   'chat.tabComments': 'نظرات',
   'chat.commentsSoon': 'نظرات — به زودی',

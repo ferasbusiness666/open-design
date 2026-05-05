@@ -405,6 +405,7 @@ export const uk: Dict = {
 
   'project.backToProjects': 'Назад до проектів',
   'project.metaFreeform': 'вільна форма',
+  'project.resizeChatPanel': 'Змінити розмір панелі чату',
   'chat.tabChat': 'Чат',
   'chat.tabComments': 'Коментарі',
   'chat.commentsSoon': 'Коментарі — скоро',
