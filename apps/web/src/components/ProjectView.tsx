@@ -239,8 +239,9 @@ export function ProjectView({
   const [resizingChatPanel, setResizingChatPanel] = useState(false);
   const splitRef = useRef<HTMLDivElement | null>(null);
   const chatPanelWidthRef = useRef(chatPanelWidth);
+  const preferredChatPanelWidthRef = useRef(chatPanelWidth);
+  const resizeStartPreferredWidthRef = useRef(chatPanelWidth);
   const chatPanelMaxWidthRef = useRef(chatPanelMaxWidth);
-  const resizeFinalWidthRef = useRef(chatPanelWidth);
   const resizeStateRef = useRef<{ rect: DOMRect; isRtl: boolean } | null>(null);
   const pointerCleanupRef = useRef<(() => void) | null>(null);
   const pointerFrameRef = useRef<number | null>(null);
@@ -1481,13 +1482,21 @@ export function ProjectView({
     [skills, project.skillId],
   );
 
-  const applyChatPanelWidth = useCallback((width: number): number => {
-    const next = clampChatPanelWidth(width, chatPanelMaxWidthRef.current);
+  const renderPreferredChatPanelWidth = useCallback((
+    preferredWidth: number,
+    maxWidth = chatPanelMaxWidthRef.current,
+  ): number => {
+    const next = clampChatPanelWidth(preferredWidth, maxWidth);
     chatPanelWidthRef.current = next;
-    resizeFinalWidthRef.current = next;
     setChatPanelWidth(next);
     return next;
   }, []);
+
+  const applyChatPanelWidth = useCallback((width: number): number => {
+    const nextPreferred = clampChatPanelWidth(width, chatPanelMaxWidthRef.current);
+    preferredChatPanelWidthRef.current = nextPreferred;
+    return renderPreferredChatPanelWidth(nextPreferred);
+  }, [renderPreferredChatPanelWidth]);
 
   const finishChatPanelResize = useCallback((saveFinalWidth = true) => {
     pointerCleanupRef.current?.();
@@ -1499,12 +1508,11 @@ export function ProjectView({
     pendingPointerClientXRef.current = null;
     resizeStateRef.current = null;
     setResizingChatPanel(false);
-    if (saveFinalWidth) saveChatPanelWidth(resizeFinalWidthRef.current);
+    if (saveFinalWidth) saveChatPanelWidth(preferredChatPanelWidthRef.current);
   }, []);
 
   useEffect(() => {
     chatPanelWidthRef.current = chatPanelWidth;
-    resizeFinalWidthRef.current = chatPanelWidth;
   }, [chatPanelWidth]);
 
   useEffect(() => {
@@ -1519,14 +1527,7 @@ export function ProjectView({
       const nextMax = maxChatPanelWidthForSplit(split.clientWidth);
       chatPanelMaxWidthRef.current = nextMax;
       setChatPanelMaxWidth(nextMax);
-      const currentWidth = chatPanelWidthRef.current;
-      const next = clampChatPanelWidth(currentWidth, nextMax);
-      if (next !== currentWidth) {
-        chatPanelWidthRef.current = next;
-        resizeFinalWidthRef.current = next;
-        setChatPanelWidth(next);
-        saveChatPanelWidth(next);
-      }
+      renderPreferredChatPanelWidth(preferredChatPanelWidthRef.current, nextMax);
     };
 
     updateAllowedWidth();
@@ -1539,9 +1540,9 @@ export function ProjectView({
 
     window.addEventListener('resize', updateAllowedWidth);
     return () => window.removeEventListener('resize', updateAllowedWidth);
-  }, []);
+  }, [renderPreferredChatPanelWidth]);
 
-  useEffect(() => () => finishChatPanelResize(true), [finishChatPanelResize]);
+  useEffect(() => () => finishChatPanelResize(false), [finishChatPanelResize]);
 
   const handleChatResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -1552,6 +1553,7 @@ export function ProjectView({
     event.currentTarget.setPointerCapture(event.pointerId);
     pointerCleanupRef.current?.();
     setResizingChatPanel(true);
+    resizeStartPreferredWidthRef.current = preferredChatPanelWidthRef.current;
 
     const updateWidthFromClientX = (clientX: number) => {
       const state = resizeStateRef.current;
@@ -1590,23 +1592,32 @@ export function ProjectView({
       flushPendingPointerMove();
       finishChatPanelResize(true);
     };
+    const handlePointerCancel = () => {
+      flushPendingPointerMove();
+      preferredChatPanelWidthRef.current = resizeStartPreferredWidthRef.current;
+      renderPreferredChatPanelWidth(resizeStartPreferredWidthRef.current);
+      finishChatPanelResize(false);
+    };
     const cleanup = () => {
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerEnd);
-      window.removeEventListener('pointercancel', handlePointerEnd);
-      window.removeEventListener('blur', handlePointerEnd);
+      window.removeEventListener('pointercancel', handlePointerCancel);
+      window.removeEventListener('blur', handlePointerCancel);
     };
 
     pointerCleanupRef.current = cleanup;
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerEnd);
-    window.addEventListener('pointercancel', handlePointerEnd);
-    window.addEventListener('blur', handlePointerEnd);
-  }, [applyChatPanelWidth, finishChatPanelResize]);
+    window.addEventListener('pointercancel', handlePointerCancel);
+    window.addEventListener('blur', handlePointerCancel);
+  }, [applyChatPanelWidth, finishChatPanelResize, renderPreferredChatPanelWidth]);
 
   const handleChatResizeBlur = useCallback(() => {
-    if (pointerCleanupRef.current) finishChatPanelResize(true);
-  }, [finishChatPanelResize]);
+    if (!pointerCleanupRef.current) return;
+    preferredChatPanelWidthRef.current = resizeStartPreferredWidthRef.current;
+    renderPreferredChatPanelWidth(resizeStartPreferredWidthRef.current);
+    finishChatPanelResize(false);
+  }, [finishChatPanelResize, renderPreferredChatPanelWidth]);
 
   const handleChatResizeKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     let nextWidth: number | null = null;
