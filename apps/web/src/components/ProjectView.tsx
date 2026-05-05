@@ -1610,10 +1610,12 @@ export function ProjectView({
 
   const handleChatResizeKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     let nextWidth: number | null = null;
+    const split = splitRef.current;
+    const isRtl = split ? window.getComputedStyle(split).direction === 'rtl' : false;
     if (event.key === 'ArrowLeft') {
-      nextWidth = chatPanelWidthRef.current - CHAT_PANEL_KEYBOARD_STEP;
+      nextWidth = chatPanelWidthRef.current + (isRtl ? 1 : -1) * CHAT_PANEL_KEYBOARD_STEP;
     } else if (event.key === 'ArrowRight') {
-      nextWidth = chatPanelWidthRef.current + CHAT_PANEL_KEYBOARD_STEP;
+      nextWidth = chatPanelWidthRef.current + (isRtl ? -1 : 1) * CHAT_PANEL_KEYBOARD_STEP;
     } else if (event.key === 'Home') {
       nextWidth = MIN_CHAT_PANEL_WIDTH;
     } else if (event.key === 'End') {
