@@ -582,6 +582,7 @@ code {
   display: grid;
   grid-template-columns: 460px 8px minmax(400px, 1fr);
   min-height: 0;
+  min-width: 0;
 }
 .split.is-resizing-chat {
   cursor: col-resize;
