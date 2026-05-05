@@ -121,22 +121,29 @@ const MAX_CHAT_PANEL_WIDTH = 720;
 const MIN_WORKSPACE_PANEL_WIDTH = 400;
 const SPLIT_RESIZE_HANDLE_WIDTH = 8;
 const CHAT_PANEL_KEYBOARD_STEP = 16;
+const MIN_NORMAL_SPLIT_WIDTH =
+  MIN_CHAT_PANEL_WIDTH + SPLIT_RESIZE_HANDLE_WIDTH + MIN_WORKSPACE_PANEL_WIDTH;
+
+function workspacePanelMinWidthForSplit(splitWidth: number): number {
+  if (!Number.isFinite(splitWidth) || splitWidth <= 0) return MIN_WORKSPACE_PANEL_WIDTH;
+  return splitWidth < MIN_NORMAL_SPLIT_WIDTH ? 0 : MIN_WORKSPACE_PANEL_WIDTH;
+}
 
 function maxChatPanelWidthForSplit(splitWidth: number): number {
   if (!Number.isFinite(splitWidth) || splitWidth <= 0) return MAX_CHAT_PANEL_WIDTH;
-  const viewportAwareMax = splitWidth - SPLIT_RESIZE_HANDLE_WIDTH - MIN_WORKSPACE_PANEL_WIDTH;
-  return Math.max(
-    MIN_CHAT_PANEL_WIDTH,
-    Math.min(MAX_CHAT_PANEL_WIDTH, Math.floor(viewportAwareMax)),
-  );
+  const workspaceMinWidth = workspacePanelMinWidthForSplit(splitWidth);
+  const viewportAwareMax = splitWidth - SPLIT_RESIZE_HANDLE_WIDTH - workspaceMinWidth;
+  return Math.max(0, Math.min(MAX_CHAT_PANEL_WIDTH, Math.floor(viewportAwareMax)));
+}
+
+function clampPreferredChatPanelWidth(width: number): number {
+  return Math.min(MAX_CHAT_PANEL_WIDTH, Math.max(MIN_CHAT_PANEL_WIDTH, Math.round(width)));
 }
 
 function clampChatPanelWidth(width: number, maxWidth = MAX_CHAT_PANEL_WIDTH): number {
-  const effectiveMax = Math.max(
-    MIN_CHAT_PANEL_WIDTH,
-    Math.min(MAX_CHAT_PANEL_WIDTH, Math.floor(maxWidth)),
-  );
-  return Math.min(effectiveMax, Math.max(MIN_CHAT_PANEL_WIDTH, Math.round(width)));
+  const effectiveMax = Math.max(0, Math.min(MAX_CHAT_PANEL_WIDTH, Math.floor(maxWidth)));
+  const effectiveMin = Math.min(MIN_CHAT_PANEL_WIDTH, effectiveMax);
+  return Math.min(effectiveMax, Math.max(effectiveMin, Math.round(width)));
 }
 
 function readSavedChatPanelWidth(): number {
@@ -145,7 +152,7 @@ function readSavedChatPanelWidth(): number {
     const raw = window.localStorage.getItem(CHAT_PANEL_WIDTH_STORAGE_KEY);
     const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
     return Number.isFinite(parsed)
-      ? clampChatPanelWidth(parsed, MAX_CHAT_PANEL_WIDTH)
+      ? clampPreferredChatPanelWidth(parsed)
       : DEFAULT_CHAT_PANEL_WIDTH;
   } catch {
     return DEFAULT_CHAT_PANEL_WIDTH;
@@ -157,7 +164,7 @@ function saveChatPanelWidth(width: number): void {
   try {
     window.localStorage.setItem(
       CHAT_PANEL_WIDTH_STORAGE_KEY,
-      String(clampChatPanelWidth(width, MAX_CHAT_PANEL_WIDTH)),
+      String(clampPreferredChatPanelWidth(width)),
     );
   } catch {
     // localStorage can be unavailable in hardened browser contexts.
@@ -236,6 +243,7 @@ export function ProjectView({
   const [liveArtifactEvents, setLiveArtifactEvents] = useState<LiveArtifactEventItem[]>([]);
   const [chatPanelWidth, setChatPanelWidth] = useState(readSavedChatPanelWidth);
   const [chatPanelMaxWidth, setChatPanelMaxWidth] = useState(MAX_CHAT_PANEL_WIDTH);
+  const [workspacePanelMinWidth, setWorkspacePanelMinWidth] = useState(MIN_WORKSPACE_PANEL_WIDTH);
   const [resizingChatPanel, setResizingChatPanel] = useState(false);
   const splitRef = useRef<HTMLDivElement | null>(null);
   const chatPanelWidthRef = useRef(chatPanelWidth);
@@ -1487,6 +1495,11 @@ export function ProjectView({
     [skills, project.skillId],
   );
   const chatResizeLabel = t('project.resizeChatPanel');
+  const workspacePanelTrack =
+    workspacePanelMinWidth === 0
+      ? 'minmax(0, 1fr)'
+      : `minmax(${workspacePanelMinWidth}px, 1fr)`;
+  const chatPanelAriaMinWidth = Math.min(MIN_CHAT_PANEL_WIDTH, chatPanelMaxWidth);
 
   const renderPreferredChatPanelWidth = useCallback((
     preferredWidth: number,
@@ -1499,7 +1512,9 @@ export function ProjectView({
   }, []);
 
   const applyChatPanelWidth = useCallback((width: number): number => {
-    const nextPreferred = clampChatPanelWidth(width, chatPanelMaxWidthRef.current);
+    const nextPreferred = clampPreferredChatPanelWidth(
+      clampChatPanelWidth(width, chatPanelMaxWidthRef.current),
+    );
     preferredChatPanelWidthRef.current = nextPreferred;
     return renderPreferredChatPanelWidth(nextPreferred);
   }, [renderPreferredChatPanelWidth]);
@@ -1530,8 +1545,11 @@ export function ProjectView({
     if (!split) return undefined;
 
     const updateAllowedWidth = () => {
-      const nextMax = maxChatPanelWidthForSplit(split.clientWidth);
+      const splitWidth = split.clientWidth;
+      const nextWorkspaceMin = workspacePanelMinWidthForSplit(splitWidth);
+      const nextMax = maxChatPanelWidthForSplit(splitWidth);
       chatPanelMaxWidthRef.current = nextMax;
+      setWorkspacePanelMinWidth(nextWorkspaceMin);
       setChatPanelMaxWidth(nextMax);
       renderPreferredChatPanelWidth(preferredChatPanelWidthRef.current, nextMax);
     };
@@ -1711,7 +1729,7 @@ export function ProjectView({
         className={`split${resizingChatPanel ? ' is-resizing-chat' : ''}`}
         style={{
           gridTemplateColumns:
-            `${chatPanelWidth}px ${SPLIT_RESIZE_HANDLE_WIDTH}px minmax(${MIN_WORKSPACE_PANEL_WIDTH}px, 1fr)`,
+            `${chatPanelWidth}px ${SPLIT_RESIZE_HANDLE_WIDTH}px ${workspacePanelTrack}`,
         }}
       >
         <ChatPane
@@ -1760,7 +1778,7 @@ export function ProjectView({
           role="separator"
           aria-orientation="vertical"
           aria-label={chatResizeLabel}
-          aria-valuemin={MIN_CHAT_PANEL_WIDTH}
+          aria-valuemin={chatPanelAriaMinWidth}
           aria-valuemax={chatPanelMaxWidth}
           aria-valuenow={chatPanelWidth}
           tabIndex={0}
