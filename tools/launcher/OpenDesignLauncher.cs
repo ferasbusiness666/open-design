@@ -26,6 +26,7 @@ namespace OpenDesignLauncher
             if (!Directory.Exists(Path.Combine(repoRoot, "node_modules", ".pnpm")))
             {
                 Console.WriteLine("Dependencies are missing. Running pnpm install first...");
+                // Requires corepack (bundled with Node 16.9+) so future maintainers know the dependency.
                 int installExit = RunCommand(repoRoot, "corepack pnpm install");
                 if (installExit != 0)
                 {
