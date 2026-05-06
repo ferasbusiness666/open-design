@@ -320,6 +320,8 @@ pnpm tools-dev run web
 # откройте web URL, который напечатает tools-dev
 ```
 
+Ярлык Windows: вы также можете дважды щёлкнуть `OpenDesign.exe` в корне репозитория. Он выполнит `pnpm install`, если зависимостей не хватает, а затем запустит Open Design через `pnpm tools-dev`.
+
 Требования к окружению: Node `~24` и pnpm `10.33.x`. `nvm`/`fnm` — только вспомогательные инструменты; если вы ими пользуетесь, выполните `nvm install 24 && nvm use 24` или `fnm install 24 && fnm use 24` перед `pnpm install`.
 
 Для desktop/background startup, перезапуска на фиксированных портах и проверки dispatcher’а media generation (`OD_BIN`, `OD_DAEMON_URL`, `apps/daemon/dist/cli.js`) смотрите [`QUICKSTART.md`](QUICKSTART.md).

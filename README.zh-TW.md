@@ -317,6 +317,8 @@ pnpm tools-dev run web
 # 開啟 tools-dev 輸出的 web URL
 ```
 
+Windows 快捷方式：也可以在 repo 根目錄雙擊 `OpenDesign.exe`。它會在依賴缺失時執行 `pnpm install`，然後用 `pnpm tools-dev` 啟動 Open Design。
+
 環境要求：Node `~24`，pnpm `10.33.x`。`nvm` / `fnm` 只是可選輔助工具，不是專案必需步驟；如果使用它們，先執行 `nvm install 24 && nvm use 24` 或 `fnm install 24 && fnm use 24`，再執行 `pnpm install`。
 
 桌面版/後臺啟動、固定埠重啟，以及 media 生成派發器檢查（`OD_BIN`、`OD_DAEMON_URL`、`apps/daemon/dist/cli.js`）見 [`QUICKSTART.md`](QUICKSTART.md)。

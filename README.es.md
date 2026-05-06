@@ -310,6 +310,8 @@ pnpm tools-dev run web
 # open the web URL printed by tools-dev
 ```
 
+Acceso directo de Windows: también puedes hacer doble clic en `OpenDesign.exe` desde la raíz del repo. Ejecuta `pnpm install` si faltan dependencias y luego inicia Open Design con `pnpm tools-dev`.
+
 Requisitos de entorno: Node `~24` y pnpm `10.33.x`. `nvm`/`fnm` son helpers opcionales; si usas uno, ejecuta `nvm install 24 && nvm use 24` o `fnm install 24 && fnm use 24` antes de `pnpm install`.
 
 Para arranque desktop/background, reinicios con puerto fijo y checks del dispatcher de media generation (`OD_BIN`, `OD_DAEMON_URL`, `apps/daemon/dist/cli.js`), consulta [`QUICKSTART.md`](QUICKSTART.md).
