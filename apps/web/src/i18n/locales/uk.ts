@@ -165,6 +165,7 @@ export const uk: Dict = {
   'promptTemplates.openFullscreen': 'Відкрити попередній перегляд у повноекранному режимі',
   'promptTemplates.closeFullscreen': 'Закрити попередній перегляд у повноекранному режимі',
   'promptTemplates.retry': 'Повторити',
+
   'connectors.title': 'Конектори',
   'connectors.subtitle': 'Локальні та майбутні джерела даних, які можуть живити live-артефакти.',
   'connectors.account': 'Обліковий запис',
