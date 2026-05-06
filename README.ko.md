@@ -319,7 +319,7 @@ pnpm tools-dev run web
 # tools-dev가 출력한 web URL을 여세요
 ```
 
-Windows 바로 가기: 저장소 루트에서 `OpenDesign.exe`를 두 번 클릭할 수도 있습니다. 의존성이 없으면 `pnpm install`을 실행한 뒤 `pnpm tools-dev`로 Open Design을 시작합니다.
+Windows 런처: `tools/launcher/README.md`의 안내에 따라 `OpenDesign.exe`를 직접 빌드하거나 GitHub Releases에서 다운로드하세요. 그런 다음 저장소 루트에 두고 두 번 클릭하면 필요할 때 `pnpm install`을 실행한 뒤 `pnpm tools-dev`로 Open Design을 시작합니다.
 
 환경 요구사항: Node `~24`와 pnpm `10.33.x`. `nvm` / `fnm`은 선택적 보조 도구일 뿐입니다; 사용한다면 `pnpm install` 전에 `nvm install 24 && nvm use 24` 또는 `fnm install 24 && fnm use 24`를 실행하세요.
 

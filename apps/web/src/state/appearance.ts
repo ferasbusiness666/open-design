@@ -17,6 +17,7 @@ export function normalizeAccentColor(value: unknown): string | null {
 function accentVars(accentColor: string): Record<(typeof ACCENT_VARS)[number], string> {
   return {
     '--accent': accentColor,
+    // Keep these mix ratios in sync with the pre-hydration script in app/layout.tsx.
     '--accent-strong': `color-mix(in srgb, ${accentColor} 86%, var(--text-strong))`,
     '--accent-soft': `color-mix(in srgb, ${accentColor} 22%, var(--bg-panel))`,
     '--accent-tint': `color-mix(in srgb, ${accentColor} 12%, var(--bg-panel))`,

@@ -319,7 +319,7 @@ pnpm tools-dev run web
 # 打开 tools-dev 输出的 web URL
 ```
 
-Windows 快捷方式：也可以在仓库根目录双击 `OpenDesign.exe`。它会在依赖缺失时运行 `pnpm install`，然后用 `pnpm tools-dev` 启动 Open Design。
+Windows 启动器：请按照 `tools/launcher/README.md` 中的说明自行构建 `OpenDesign.exe`，或从 GitHub Releases 下载。然后将它放到仓库根目录并双击；它会在需要时运行 `pnpm install`，再用 `pnpm tools-dev` 启动 Open Design。
 
 环境要求：Node `~24`，pnpm `10.33.x`。`nvm` / `fnm` 只是可选辅助工具，不是项目必需步骤；如果使用它们，先执行 `nvm install 24 && nvm use 24` 或 `fnm install 24 && fnm use 24`，再运行 `pnpm install`。
 
