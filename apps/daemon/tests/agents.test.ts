@@ -138,6 +138,64 @@ test('codex args keep plugins enabled when OD_CODEX_DISABLE_PLUGINS is not 1', (
   assert.equal(args.includes('plugins'), false);
 });
 
+test('codex model picker includes current OpenAI choices in priority order', async () => {
+  const expectedModels = [
+    'default',
+    'gpt-5.5',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.3-codex',
+    'gpt-5-codex',
+    'gpt-5',
+    'o3',
+    'o4-mini',
+  ];
+
+  assert.deepEqual(codex.fallbackModels.map((m) => m.id), expectedModels);
+  assert.deepEqual(codex.reasoningOptions.map((o) => o.id), [
+    'default',
+    'none',
+    'minimal',
+    'low',
+    'medium',
+    'high',
+    'xhigh',
+  ]);
+
+  const args = codex.buildArgs(
+    '',
+    [],
+    [],
+    { model: 'gpt-5.5', reasoning: 'xhigh' },
+    { cwd: '/tmp/od-project' },
+  );
+  assert.ok(args.includes('--model'));
+  assert.ok(args.includes('gpt-5.5'));
+  assert.ok(args.includes('model_reasoning_effort="xhigh"'));
+
+  const dir = mkdtempSync(join(tmpdir(), 'od-agents-codex-models-'));
+  try {
+    const codexBin = join(dir, 'codex');
+    writeFileSync(
+      codexBin,
+      '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex 1.0.0"; exit 0; fi\nexit 0\n',
+    );
+    chmodSync(codexBin, 0o755);
+    process.env.OD_AGENT_HOME = dir;
+    process.env.PATH = dir;
+
+    const agents = await detectAgents();
+    const detected = agents.find((agent) => agent.id === 'codex');
+
+    assert.ok(detected);
+    assert.equal(detected.available, true);
+    assert.equal(detected.version, 'codex 1.0.0');
+    assert.deepEqual(detected.models.map((m) => m.id), expectedModels);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // Recent Codex CLI versions reject a bare `-` argv sentinel; passing it
 // alongside the stdin pipe causes `error: unexpected argument '-' found`
 // and exit code 2 before any prompt is read. We deliver the prompt via
@@ -460,6 +518,7 @@ test('pi args use rpc mode without --no-session and append model/thinking option
   assert.ok(!baseArgs.includes('--no-session'), 'pi must not pass --no-session');
   assert.equal(pi.promptViaStdin, true);
   assert.equal(pi.streamFormat, 'pi-rpc');
+  assert.equal(pi.supportsImagePaths, true);
 
   const withModel = pi.buildArgs('', [], [], { model: 'anthropic/claude-sonnet-4-5' }, {});
   assert.deepEqual(withModel, [
@@ -475,6 +534,66 @@ test('pi args use rpc mode without --no-session and append model/thinking option
     'rpc',
     '--thinking',
     'high',
+  ]);
+});
+
+test('pi args forward extraAllowedDirs as --append-system-prompt flags', () => {
+  const args = pi.buildArgs(
+    '',
+    [],
+    ['/tmp/skills', '/tmp/design-systems'],
+    {},
+    {},
+  );
+
+  assert.deepEqual(args, [
+    '--mode',
+    'rpc',
+    '--append-system-prompt',
+    '/tmp/skills',
+    '--append-system-prompt',
+    '/tmp/design-systems',
+  ]);
+});
+
+test('pi args filter relative paths from extraAllowedDirs', () => {
+  const args = pi.buildArgs(
+    '',
+    [],
+    ['/tmp/skills', 'relative/path', '/tmp/design-systems'],
+    {},
+    {},
+  );
+
+  // Relative paths should be filtered out.
+  assert.deepEqual(args, [
+    '--mode',
+    'rpc',
+    '--append-system-prompt',
+    '/tmp/skills',
+    '--append-system-prompt',
+    '/tmp/design-systems',
+  ]);
+});
+
+test('pi args combine model, thinking, and extraAllowedDirs', () => {
+  const args = pi.buildArgs(
+    '',
+    [],
+    ['/tmp/skills'],
+    { model: 'openai/gpt-5', reasoning: 'medium' },
+    {},
+  );
+
+  assert.deepEqual(args, [
+    '--mode',
+    'rpc',
+    '--model',
+    'openai/gpt-5',
+    '--thinking',
+    'medium',
+    '--append-system-prompt',
+    '/tmp/skills',
   ]);
 });
 

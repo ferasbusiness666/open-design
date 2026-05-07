@@ -76,6 +76,7 @@ import {
   buildBatchArchive,
   decodeMultipartFilename,
   deleteProjectFile,
+  detectEntryFile,
   ensureProject,
   listFiles,
   mimeFor,
@@ -142,13 +143,17 @@ import { CHAT_TOOL_ENDPOINTS, CHAT_TOOL_OPERATIONS, toolTokenRegistry } from './
 import {
   buildDeployFileSet,
   checkDeploymentUrl,
+  CLOUDFLARE_PAGES_PROVIDER_ID,
+  cloudflarePagesProjectNameForProject,
   DeployError,
+  deployToCloudflarePages,
   deployToVercel,
+  isDeployProviderId,
   prepareDeployPreflight,
-  publicDeployConfig,
-  readVercelConfig,
+  publicDeployConfigForProvider,
+  readDeployConfig,
   VERCEL_PROVIDER_ID,
-  writeVercelConfig,
+  writeDeployConfig,
 } from './deploy.js';
 
 /** @typedef {import('@open-design/contracts').ApiErrorCode} ApiErrorCode */
@@ -162,6 +167,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
+const DAEMON_CLI_PATH_ENV = 'OD_DAEMON_CLI_PATH';
 export function resolveProjectRoot(moduleDir: string): string {
   const base = path.basename(moduleDir);
   const daemonDir =
@@ -169,7 +175,16 @@ export function resolveProjectRoot(moduleDir: string): string {
   return path.resolve(daemonDir, '../..');
 }
 
-export function resolveDaemonCliPath(): string {
+function cleanOptionalPath(value: string | undefined): string | null {
+  return typeof value === 'string' && value.trim().length > 0
+    ? path.resolve(value)
+    : null;
+}
+
+export function resolveDaemonCliPath(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = cleanOptionalPath(env[DAEMON_CLI_PATH_ENV]) ?? cleanOptionalPath(env.OD_BIN);
+  if (configured) return configured;
+
   const packageJsonPath = require.resolve('@open-design/daemon/package.json');
   return path.join(path.dirname(packageJsonPath), 'dist', 'cli.js');
 }
@@ -694,7 +709,16 @@ export function resolveDataDir(raw, projectRoot) {
       `OD_DATA_DIR "${resolved}" is not writable: ${e.message}`,
     );
   }
-  return resolved;
+  // Canonicalize via realpath so that any callers comparing user-supplied
+  // realpath() output against RUNTIME_DATA_DIR get a stable result. On
+  // macOS, /var is itself a symlink to /private/var, so a user's import
+  // realpath would land in /private/var/... and would never start-with
+  // a non-canonicalized RUNTIME_DATA_DIR.
+  try {
+    return fs.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
 }
 const RUNTIME_DATA_DIR = resolveDataDir(process.env.OD_DATA_DIR, PROJECT_ROOT);
 // One-shot legacy data migration. When OD_LEGACY_DATA_DIR is set and the
@@ -874,6 +898,46 @@ function sendApiError(res, status, code, message, init = {}) {
   return res
     .status(status)
     .json(createCompatApiErrorResponse(code, message, init));
+}
+
+const CLOUDFLARE_PAGES_PROJECT_METADATA_KEY = 'cloudflarePagesProjectName';
+
+function cloudflarePagesDeploymentMetadata(projectName) {
+  const normalized = typeof projectName === 'string' ? projectName.trim() : '';
+  return normalized
+    ? { [CLOUDFLARE_PAGES_PROJECT_METADATA_KEY]: normalized }
+    : undefined;
+}
+
+function cloudflarePagesProjectNameFromDeployment(deployment) {
+  const value = deployment?.providerMetadata?.[CLOUDFLARE_PAGES_PROJECT_METADATA_KEY];
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  return cloudflarePagesProjectNameFromUrl(deployment?.url);
+}
+
+function cloudflarePagesProjectNameFromUrl(rawUrl) {
+  if (typeof rawUrl !== 'string' || !rawUrl.trim()) return '';
+  try {
+    const host = new URL(rawUrl).hostname.toLowerCase();
+    if (!host.endsWith('.pages.dev')) return '';
+    const labels = host.slice(0, -'.pages.dev'.length).split('.').filter(Boolean);
+    return labels.at(-1) || '';
+  } catch {
+    return '';
+  }
+}
+
+function cloudflarePagesProjectNameForDeploy(db, projectId, projectName, prior) {
+  const priorName = cloudflarePagesProjectNameFromDeployment(prior);
+  if (priorName) return priorName;
+
+  for (const deployment of listDeployments(db, projectId)) {
+    if (deployment.providerId !== CLOUDFLARE_PAGES_PROVIDER_ID) continue;
+    const stableName = cloudflarePagesProjectNameFromDeployment(deployment);
+    if (stableName) return stableName;
+  }
+
+  return cloudflarePagesProjectNameForProject(projectId, projectName);
 }
 
 // Filename slug for the Content-Disposition header on archive downloads.
@@ -1154,11 +1218,25 @@ const importUpload = multer({
 // folder (flat — same shape FileWorkspace expects), so the composer's
 // pasted/dropped/picked images become referenceable filenames the agent
 // can Read or @-mention without any cross-folder gymnastics.
+// Bridge between the multer upload-storage destination (built at module
+// init) and the per-process project DB (instantiated inside startServer).
+// startServer() sets this so the upload destination can route attachments
+// into the right project root, including folder-imported projects whose
+// files live under metadata.baseDir.
+let projectMetadataLookup: ((id: string) => Record<string, unknown> | null) | null = null;
+
 const projectUpload = multer({
   storage: multer.diskStorage({
     destination: async (req, _file, cb) => {
       try {
-        const dir = await ensureProject(PROJECTS_DIR, req.params.id);
+        // Route uploads into the project's actual root: for folder-imported
+        // projects (metadata.baseDir set) attachments need to land alongside
+        // the user's files so the agent can read them via the same path
+        // it sees. projectMetadataLookup is populated at startServer() boot
+        // and keyed by project id; null fallback gives the standard
+        // .od/projects/<id>/ behavior for non-imported projects.
+        const meta = projectMetadataLookup?.(req.params.id) ?? null;
+        const dir = await ensureProject(PROJECTS_DIR, req.params.id, meta);
         cb(null, dir);
       } catch (err) {
         cb(err, '');
@@ -1412,6 +1490,11 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
     next();
   });
   const db = openDatabase(PROJECT_ROOT, { dataDir: RUNTIME_DATA_DIR });
+  // Wire the upload-destination bridge to this db so multer can route
+  // file uploads into baseDir-rooted projects' actual folders.
+  projectMetadataLookup = (id) => {
+    try { return getProject(db, id)?.metadata ?? null; } catch { return null; }
+  };
   configureConnectorCredentialStore(new FileConnectorCredentialStore(RUNTIME_DATA_DIR));
   configureComposioConfigStore(RUNTIME_DATA_DIR);
   let daemonUrl = `http://127.0.0.1:${port}`;
@@ -1573,7 +1656,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
     const hints: string[] = [];
     if (!cliExists) {
       hints.push(
-        'apps/daemon/dist/cli.js is missing. Run `pnpm --filter @open-design/daemon build` and refresh.',
+        `Open Design CLI entry is missing at ${cliPath}. Rebuild the daemon or packaged app and refresh.`,
       );
     }
     if (!nodeExists) {
@@ -1658,6 +1741,22 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
       }
       if (typeof name !== 'string' || !name.trim()) {
         return sendApiError(res, 400, 'BAD_REQUEST', 'name required');
+      }
+      // baseDir is privileged: it lets a project root directly inside the
+      // user's filesystem. The /api/import/folder endpoint is the only
+      // path that's allowed to set it, because that's where realpath() +
+      // RUNTIME_DATA_DIR reentry checks live. Block client-supplied
+      // metadata.baseDir on this generic create endpoint so an attacker
+      // can't smuggle e.g. /etc through here. Same rule for
+      // originalBaseDir / importedFrom='folder' — only the import path
+      // owns those state fields.
+      if (metadata && typeof metadata === 'object') {
+        if ('baseDir' in metadata) {
+          return sendApiError(
+            res, 400, 'BAD_REQUEST',
+            'baseDir can only be set via POST /api/import/folder',
+          );
+        }
       }
       const now = Date.now();
       const project = insertProject(db, {
@@ -1793,6 +1892,94 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
     },
   );
 
+  // Import an existing local folder as a project. The user picks a folder
+  // and OD works inside it directly: every write goes to metadata.baseDir.
+  // No copy, no shadow tree — the user owns the workspace and is
+  // responsible for their own version control (git, time machine, etc.),
+  // mirroring how Cursor / Claude Code / Aider behave.
+  app.post('/api/import/folder', async (req, res) => {
+    try {
+      const { baseDir, name, skillId, designSystemId } = req.body || {};
+      if (typeof baseDir !== 'string' || !baseDir.trim()) {
+        return sendApiError(res, 400, 'BAD_REQUEST', 'baseDir required');
+      }
+      const trimmedInput = baseDir.trim();
+      if (!path.isAbsolute(path.normalize(trimmedInput))) {
+        return sendApiError(res, 400, 'BAD_REQUEST', 'baseDir must be absolute');
+      }
+      // Resolve symlinks once at import and persist the canonical path.
+      // Without this, a user-controlled symlink (e.g. ~/sneaky → /etc) at
+      // baseDir would let writeProjectFile escape the project sandbox at
+      // every later call: resolveSafe checks the *literal* baseDir, but
+      // the OS follows the symlink at write time. realpath() collapses
+      // the chain so the stored baseDir == what the kernel will write to.
+      let normalizedPath: string;
+      try {
+        normalizedPath = await fs.promises.realpath(trimmedInput);
+      } catch {
+        return sendApiError(res, 400, 'BAD_REQUEST', 'folder not found');
+      }
+      // realpath resolved → lstat the canonical path to ensure it's a
+      // real directory, not another symlink (defense-in-depth).
+      let dirStat;
+      try {
+        dirStat = await fs.promises.lstat(normalizedPath);
+      } catch {
+        return sendApiError(res, 400, 'BAD_REQUEST', 'folder not found');
+      }
+      if (!dirStat.isDirectory()) {
+        return sendApiError(res, 400, 'BAD_REQUEST', 'path must be a directory');
+      }
+      // Prevent importing the data directory into itself (post-realpath so
+      // a symlink pointing into RUNTIME_DATA_DIR is also caught).
+      if (
+        normalizedPath === RUNTIME_DATA_DIR ||
+        normalizedPath.startsWith(RUNTIME_DATA_DIR + path.sep)
+      ) {
+        return sendApiError(res, 400, 'BAD_REQUEST', 'cannot import the data directory');
+      }
+
+      const id = randomId();
+      const now = Date.now();
+      const projectName =
+        typeof name === 'string' && name.trim()
+          ? name.trim()
+          : path.basename(normalizedPath);
+      const entryFile = await detectEntryFile(normalizedPath);
+
+      const project = insertProject(db, {
+        id,
+        name: projectName,
+        skillId: skillId ?? null,
+        designSystemId: designSystemId ?? null,
+        pendingPrompt: null,
+        metadata: {
+          kind: 'prototype',
+          baseDir: normalizedPath,
+          importedFrom: 'folder',
+          entryFile,
+        },
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const cid = randomId();
+      insertConversation(db, {
+        id: cid,
+        projectId: id,
+        title: `Imported from ${projectName}`,
+        createdAt: now,
+        updatedAt: now,
+      });
+      if (entryFile) setTabs(db, id, [entryFile], entryFile);
+      /** @type {import('@open-design/contracts').ImportFolderResponse} */
+      const body = { project, conversationId: cid, entryFile };
+      res.json(body);
+    } catch (err) {
+      sendApiError(res, 400, 'BAD_REQUEST', String(err));
+    }
+  });
+
   app.get('/api/projects/:id', (req, res) => {
     const project = getProject(db, req.params.id);
     if (!project)
@@ -1805,6 +1992,45 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
   app.patch('/api/projects/:id', (req, res) => {
     try {
       const patch = req.body || {};
+      // baseDir / folder-import state is privileged: it's set only by the
+      // import endpoint and otherwise immutable. Two failure modes to
+      // guard against here:
+      //   1. Explicit attempt to change baseDir → reject with 400.
+      //   2. A regular metadata patch that *omits* baseDir (e.g. a UI
+      //      that only edits linkedDirs sends `{ metadata: { kind, linkedDirs } }`).
+      //      updateProject() replaces metadata wholesale, so without
+      //      preservation the existing baseDir gets wiped and the project
+      //      detaches from the user's folder — subsequent reads/writes
+      //      silently fall back to .od/projects/<id>.
+      // For case 2 we re-stamp the immutable fields from the existing
+      // project record onto the incoming patch so the user can keep
+      // patching other metadata without ever losing their import root.
+      if (patch.metadata && typeof patch.metadata === 'object') {
+        const existing = getProject(db, req.params.id);
+        const existingMeta = existing?.metadata;
+        if (existingMeta?.baseDir) {
+          if ('baseDir' in patch.metadata && patch.metadata.baseDir !== existingMeta.baseDir) {
+            return sendApiError(
+              res, 400, 'BAD_REQUEST',
+              'baseDir is immutable after import; use a new import to change it',
+            );
+          }
+          patch.metadata = {
+            ...patch.metadata,
+            baseDir: existingMeta.baseDir,
+            ...(existingMeta.importedFrom === 'folder'
+              ? { importedFrom: 'folder' }
+              : {}),
+          };
+        } else if ('baseDir' in patch.metadata) {
+          // Non-imported project trying to acquire a baseDir → reject (only
+          // /api/import/folder can set it).
+          return sendApiError(
+            res, 400, 'BAD_REQUEST',
+            'baseDir can only be set via POST /api/import/folder',
+          );
+        }
+      }
       if (patch.metadata?.linkedDirs) {
         const validated = validateLinkedDirs(patch.metadata.linkedDirs);
         if (validated.error) {
@@ -1858,9 +2084,10 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
         activeProjectEventSinks.set(req.params.id, sinks);
       }
       sinks.add(projectEventSink);
+      const watchProject = getProject(db, req.params.id);
       sub = subscribeFileEvents(PROJECTS_DIR, req.params.id, (evt) => {
         sse.send('file-changed', evt);
-      });
+      }, { metadata: watchProject?.metadata });
       sub.ready.then(() => sse.send('ready', { projectId: req.params.id })).catch(() => {});
       const cleanup = () => {
         if (sub) {
@@ -2078,13 +2305,16 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
       if (typeof sourceProjectId !== 'string') {
         return res.status(400).json({ error: 'sourceProjectId required' });
       }
-      if (!getProject(db, sourceProjectId)) {
+      const sourceProject = getProject(db, sourceProjectId);
+      if (!sourceProject) {
         return res.status(404).json({ error: 'source project not found' });
       }
       // Snapshot every HTML / sketch / text file in the source project.
       // We deliberately skip binary uploads — templates are about the
       // generated design, not the user's reference imagery.
-      const files = await listFiles(PROJECTS_DIR, sourceProjectId);
+      const files = await listFiles(PROJECTS_DIR, sourceProjectId, {
+        metadata: sourceProject.metadata,
+      });
       const snapshot = [];
       for (const f of files) {
         if (f.kind !== 'html' && f.kind !== 'text' && f.kind !== 'code')
@@ -2093,6 +2323,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
           PROJECTS_DIR,
           sourceProjectId,
           f.name,
+          sourceProject.metadata,
         );
         if (entry && Buffer.isBuffer(entry.buffer)) {
           snapshot.push({
@@ -2781,10 +3012,15 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
 
   // ---- Deploy --------------------------------------------------------------
 
-  app.get('/api/deploy/config', async (_req, res) => {
+  app.get('/api/deploy/config', async (req, res) => {
     try {
+      const providerId =
+        typeof req.query.providerId === 'string' ? req.query.providerId : VERCEL_PROVIDER_ID;
+      if (!isDeployProviderId(providerId)) {
+        return sendApiError(res, 400, 'BAD_REQUEST', 'unsupported deploy provider');
+      }
       /** @type {import('@open-design/contracts').DeployConfigResponse} */
-      const body = publicDeployConfig(await readVercelConfig());
+      const body = publicDeployConfigForProvider(providerId, await readDeployConfig(providerId));
       res.json(body);
     } catch (err) {
       sendApiError(res, 500, 'INTERNAL_ERROR', String(err?.message || err));
@@ -2793,8 +3029,14 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
 
   app.put('/api/deploy/config', async (req, res) => {
     try {
+      const input = req.body || {};
+      const providerId =
+        typeof input.providerId === 'string' ? input.providerId : VERCEL_PROVIDER_ID;
+      if (!isDeployProviderId(providerId)) {
+        return sendApiError(res, 400, 'BAD_REQUEST', 'unsupported deploy provider');
+      }
       /** @type {import('@open-design/contracts').DeployConfigResponse} */
-      const body = await writeVercelConfig(req.body || {});
+      const body = await writeDeployConfig(providerId, input);
       res.json(body);
     } catch (err) {
       sendApiError(res, 400, 'BAD_REQUEST', String(err?.message || err));
@@ -2814,7 +3056,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
   app.post('/api/projects/:id/deploy', async (req, res) => {
     try {
       const { fileName, providerId = VERCEL_PROVIDER_ID } = req.body || {};
-      if (providerId !== VERCEL_PROVIDER_ID) {
+      if (!isDeployProviderId(providerId)) {
         return sendApiError(
           res,
           400,
@@ -2827,16 +3069,32 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
       }
 
       const prior = getDeployment(db, req.params.id, fileName, providerId);
+      const deployProject = getProject(db, req.params.id);
       const files = await buildDeployFileSet(
         PROJECTS_DIR,
         req.params.id,
         fileName,
+        { metadata: deployProject?.metadata },
       );
-      const result = await deployToVercel({
-        config: await readVercelConfig(),
-        files,
-        projectId: req.params.id,
-      });
+      const project = getProject(db, req.params.id);
+      const cloudflarePagesProjectName =
+        providerId === CLOUDFLARE_PAGES_PROVIDER_ID
+          ? cloudflarePagesProjectNameForDeploy(db, req.params.id, project?.name, prior)
+          : '';
+      const result = providerId === CLOUDFLARE_PAGES_PROVIDER_ID
+        ? await deployToCloudflarePages({
+            config: {
+              ...await readDeployConfig(CLOUDFLARE_PAGES_PROVIDER_ID),
+              projectName: cloudflarePagesProjectName,
+            },
+            files,
+            projectId: req.params.id,
+          })
+        : await deployToVercel({
+            config: await readDeployConfig(VERCEL_PROVIDER_ID),
+            files,
+            projectId: req.params.id,
+          });
       const now = Date.now();
       /** @type {import('@open-design/contracts').DeployProjectFileResponse} */
       const body = upsertDeployment(db, {
@@ -2851,6 +3109,10 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
         status: result.status,
         statusMessage: result.statusMessage,
         reachableAt: result.reachableAt,
+        providerMetadata:
+          providerId === CLOUDFLARE_PAGES_PROVIDER_ID
+            ? cloudflarePagesDeploymentMetadata(cloudflarePagesProjectName)
+            : prior?.providerMetadata,
         createdAt: prior?.createdAt ?? now,
         updatedAt: now,
       });
@@ -2874,7 +3136,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
   app.post('/api/projects/:id/deploy/preflight', async (req, res) => {
     try {
       const { fileName, providerId = VERCEL_PROVIDER_ID } = req.body || {};
-      if (providerId !== VERCEL_PROVIDER_ID) {
+      if (!isDeployProviderId(providerId)) {
         return sendApiError(
           res,
           400,
@@ -2885,11 +3147,13 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
       if (typeof fileName !== 'string' || !fileName.trim()) {
         return sendApiError(res, 400, 'BAD_REQUEST', 'fileName required');
       }
+      const preflightProject = getProject(db, req.params.id);
       /** @type {import('@open-design/contracts').DeployPreflightResponse} */
       const body = await prepareDeployPreflight(
         PROJECTS_DIR,
         req.params.id,
         fileName,
+        { metadata: preflightProject?.metadata, providerId },
       );
       res.json(body);
     } catch (err) {
@@ -2927,11 +3191,19 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
             'deployment not found',
           );
         }
-        const result = await checkDeploymentUrl(existing.url);
+        const stableCloudflareProjectName =
+          existing.providerId === CLOUDFLARE_PAGES_PROVIDER_ID
+            ? cloudflarePagesProjectNameFromDeployment(existing)
+            : '';
+        const checkUrl = stableCloudflareProjectName
+          ? `https://${stableCloudflareProjectName}.pages.dev`
+          : existing.url;
+        const result = await checkDeploymentUrl(checkUrl);
         const now = Date.now();
         /** @type {import('@open-design/contracts').CheckDeploymentLinkResponse} */
         const body = upsertDeployment(db, {
           ...existing,
+          url: checkUrl || existing.url,
           status: result.reachable ? 'ready' : result.status || 'link-delayed',
           statusMessage: result.reachable
             ? 'Public link is ready.'
@@ -2960,8 +3232,10 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
   app.get('/api/projects/:id/files', async (req, res) => {
     try {
       const since = Number(req.query?.since);
+      const project = getProject(db, req.params.id);
       const files = await listFiles(PROJECTS_DIR, req.params.id, {
         since: Number.isFinite(since) ? since : undefined,
+        metadata: project?.metadata,
       });
       /** @type {import('@open-design/contracts').ProjectFilesResponse} */
       const body = { files };
@@ -2980,9 +3254,11 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
       }
       const pattern = req.query.pattern ? String(req.query.pattern) : null;
       const max = Math.min(Number(req.query.max) || 200, 1000);
+      const searchProject = getProject(db, req.params.id);
       const matches = await searchProjectFiles(PROJECTS_DIR, req.params.id, query, {
         pattern,
         max,
+        metadata: searchProject?.metadata,
       });
       res.json({ query, matches });
     } catch (err) {
@@ -2998,12 +3274,13 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
   app.get('/api/projects/:id/archive', async (req, res) => {
     try {
       const root = typeof req.query?.root === 'string' ? req.query.root : '';
+      const project = getProject(db, req.params.id);
       const { buffer, baseName } = await buildProjectArchive(
         PROJECTS_DIR,
         req.params.id,
         root,
+        project?.metadata,
       );
-      const project = getProject(db, req.params.id);
       const fallbackName = project?.name || req.params.id;
       const fileSlug = sanitizeArchiveFilename(baseName || fallbackName) || 'project';
       const filename = `${fileSlug}.zip`;
@@ -3039,12 +3316,13 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
         sendApiError(res, 400, 'BAD_REQUEST', 'files must be a non-empty array');
         return;
       }
+      const project = getProject(db, req.params.id);
       const { buffer } = await buildBatchArchive(
         PROJECTS_DIR,
         req.params.id,
         files,
+        project?.metadata,
       );
-      const project = getProject(db, req.params.id);
       const fileSlug = sanitizeArchiveFilename(project?.name || req.params.id) || 'project';
       const filename = `${fileSlug}.zip`;
       const asciiFallback =
@@ -3082,7 +3360,8 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
   app.get('/api/projects/:id/raw/*', async (req, res) => {
     try {
       const relPath = req.params[0];
-      const file = await readProjectFile(PROJECTS_DIR, req.params.id, relPath);
+      const project = getProject(db, req.params.id);
+      const file = await readProjectFile(PROJECTS_DIR, req.params.id, relPath, project?.metadata);
       // PreviewModal loads artifact HTML via srcdoc, giving the iframe Origin: "null".
       // data: URIs, file://, and some sandboxed iframes also send null — all are
       // local-only callers, so this is safe. Real cross-origin sites send a real
@@ -3104,7 +3383,8 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
 
   app.delete('/api/projects/:id/raw/*', async (req, res) => {
     try {
-      await deleteProjectFile(PROJECTS_DIR, req.params.id, req.params[0]);
+      const project = getProject(db, req.params.id);
+      await deleteProjectFile(PROJECTS_DIR, req.params.id, req.params[0], project?.metadata);
       /** @type {import('@open-design/contracts').DeleteProjectFileResponse} */
       const body = { ok: true };
       res.json(body);
@@ -3121,10 +3401,12 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
 
   app.get('/api/projects/:id/files/:name/preview', async (req, res) => {
     try {
+      const project = getProject(db, req.params.id);
       const file = await readProjectFile(
         PROJECTS_DIR,
         req.params.id,
         req.params.name,
+        project?.metadata,
       );
       const preview = await buildDocumentPreview(file);
       res.json(preview);
@@ -3146,10 +3428,12 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
 
   app.get('/api/projects/:id/files/*', async (req, res) => {
     try {
+      const project = getProject(db, req.params.id);
       const file = await readProjectFile(
         PROJECTS_DIR,
         req.params.id,
         req.params[0],
+        project?.metadata,
       );
       res.type(file.mime).send(file.buffer);
     } catch (err) {
@@ -3176,7 +3460,8 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
     },
     async (req, res) => {
       try {
-        await ensureProject(PROJECTS_DIR, req.params.id);
+        const uploadProject = getProject(db, req.params.id);
+        await ensureProject(PROJECTS_DIR, req.params.id, uploadProject?.metadata);
         if (req.file) {
           const buf = await fs.promises.readFile(req.file.path);
           const desiredName = sanitizeName(
@@ -3187,6 +3472,8 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
             req.params.id,
             desiredName,
             buf,
+            {},
+            uploadProject?.metadata,
           );
           fs.promises.unlink(req.file.path).catch(() => {});
           /** @type {import('@open-design/contracts').ProjectFileResponse} */
@@ -3225,9 +3512,8 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
           req.params.id,
           name,
           buf,
-          {
-            artifactManifest,
-          },
+          { artifactManifest },
+          uploadProject?.metadata,
         );
         /** @type {import('@open-design/contracts').ProjectFileResponse} */
         const body = { file: meta };
@@ -3240,7 +3526,8 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
 
   app.delete('/api/projects/:id/files/:name', async (req, res) => {
     try {
-      await deleteProjectFile(PROJECTS_DIR, req.params.id, req.params.name);
+      const delProject = getProject(db, req.params.id);
+      await deleteProjectFile(PROJECTS_DIR, req.params.id, req.params.name, delProject?.metadata);
       /** @type {import('@open-design/contracts').DeleteProjectFileResponse} */
       const body = { ok: true };
       res.json(body);
@@ -3723,12 +4010,21 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
     // doesn't exist yet). Without one we don't pass cwd to spawn — the
     // agent then runs in whatever inherited dir, which still lets API
     // mode work but loses file-tool addressability.
+    // For git-linked projects (metadata.baseDir), use that folder directly
+    // so the agent writes back to the user's original source tree.
     let cwd = null;
     let existingProjectFiles = [];
     if (typeof projectId === 'string' && projectId) {
       try {
-        cwd = await ensureProject(PROJECTS_DIR, projectId);
-        existingProjectFiles = await listFiles(PROJECTS_DIR, projectId);
+        const chatProject = getProject(db, projectId);
+        const chatMeta = chatProject?.metadata;
+        if (chatMeta?.baseDir) {
+          cwd = path.normalize(chatMeta.baseDir);
+          existingProjectFiles = await listFiles(PROJECTS_DIR, projectId, { metadata: chatMeta });
+        } else {
+          cwd = await ensureProject(PROJECTS_DIR, projectId);
+          existingProjectFiles = await listFiles(PROJECTS_DIR, projectId);
+        }
       } catch {
         cwd = null;
       }
@@ -4300,12 +4596,44 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
       child.stdout.on('data', (chunk) => copilot.feed(chunk));
       child.on('close', () => copilot.flush());
     } else if (def.streamFormat === 'pi-rpc') {
+      // Route through sendAgentEvent so that pi-rpc's error events
+      // (extension_error, auto_retry_end with success=false, and the
+      // message_update error delta) set agentStreamError and flip the
+      // run to `failed` on close — same path as qoder-stream-json and
+      // json-event-stream after issue #691. Also enables the
+      // substantive-output guard (agentProducedOutput) so a pi run
+      // that exits 0 without producing visible content is caught.
+      //
+      // attachPiRpcSession invokes its send callback with the two-arg
+      // channel/payload shape: send('agent', payload) for normal events
+      // and send('error', {message}) from fail(). sendAgentEvent
+      // expects a single event object, so we adapt at the call site:
+      //   - 'agent' channel → relay payload through sendAgentEvent
+      //   - 'error' channel → route through the daemon's error path
+      //     (createSseErrorPayload + send SSE + set agentStreamError)
+      trackingSubstantiveOutput = true;
       acpSession = attachPiRpcSession({
         child,
         prompt: composed,
         cwd: effectiveCwd,
         model: safeModel,
-        send,
+        send: (channel, payload) => {
+          if (channel === 'agent') {
+            sendAgentEvent(payload);
+          } else if (channel === 'error') {
+            if (agentStreamError) return;
+            agentStreamError = String(payload?.message || 'Pi session error');
+            send('error', createSseErrorPayload(
+              'AGENT_EXECUTION_FAILED',
+              agentStreamError,
+              { retryable: false },
+            ));
+          } else {
+            send(channel, payload);
+          }
+        },
+        imagePaths: def.supportsImagePaths ? safeImages : [],
+        uploadRoot: UPLOAD_DIR,
       });
     } else if (def.streamFormat === 'acp-json-rpc') {
       acpSession = attachAcpSession({
