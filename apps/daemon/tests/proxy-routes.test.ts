@@ -202,6 +202,33 @@ describe('API proxy routes', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    'http://0.0.0.0:11434/v1',
+    'http://169.254.169.254/latest/meta-data',
+    'http://[::]/v1',
+    'http://[::ffff:192.168.1.50]:11434/v1',
+    'http://[fd00::1]:11434/v1',
+    'http://[fe80::1]:11434/v1',
+  ])('blocks local and private API base URL form %s before proxying', async (privateBaseUrl) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await realFetch(`${baseUrl}/api/proxy/openai/stream`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: privateBaseUrl,
+        apiKey: 'sk-private',
+        model: 'private-model',
+        messages: [{ role: 'user', content: 'hello' }],
+      }),
+    });
+
+    expect(res.status).toBe(403);
+    await expect(res.text()).resolves.toContain('Internal IPs blocked');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('surfaces OpenAI-compatible in-stream error frames', async () => {
     vi.stubGlobal('fetch', vi.fn((input: FetchInput, init?: FetchInit) => {
       const url = String(input);

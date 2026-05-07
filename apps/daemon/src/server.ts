@@ -4297,18 +4297,63 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
       return { error: 'Only http/https allowed' };
     }
     const hostname = parsed.hostname.toLowerCase();
-    const isLoopback =
-      ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
-    if (
-      !isLoopback &&
-      (hostname.startsWith('169.254.') ||
-        hostname.startsWith('10.') ||
-        /^192\.168\./.test(hostname) ||
-        /^172\.(1[6-9]|2\d|3[01])\./.test(hostname))
-    ) {
+    if (isBlockedExternalApiHostname(hostname)) {
       return { error: 'Internal IPs blocked', forbidden: true };
     }
     return { parsed };
+  };
+
+  const isBlockedExternalApiHostname = (hostname) => {
+    const normalized = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+    if (!normalized || normalized === 'localhost') return false;
+    if (normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') return false;
+
+    const mapped = ipv4FromMappedIpv6(normalized);
+    const host = mapped ?? normalized;
+    const family = net.isIP(host);
+    if (family === 4) {
+      const parts = host.split('.').map((part) => Number(part));
+      if (parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+      const [a, b] = parts;
+      return (
+        a === 0 ||
+        a === 10 ||
+        a === 100 && b >= 64 && b <= 127 ||
+        a === 169 && b === 254 ||
+        a === 172 && b >= 16 && b <= 31 ||
+        a === 192 && b === 168 ||
+        a >= 224 ||
+        (a === 127 ? host !== '127.0.0.1' : false)
+      );
+    }
+    if (family === 6) {
+      return (
+        normalized === '::' ||
+        normalized.startsWith('fc') ||
+        normalized.startsWith('fd') ||
+        normalized.startsWith('fe8') ||
+        normalized.startsWith('fe9') ||
+        normalized.startsWith('fea') ||
+        normalized.startsWith('feb')
+      );
+    }
+    return false;
+  };
+
+  const ipv4FromMappedIpv6 = (hostname) => {
+    const dotted = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(hostname);
+    if (dotted) return dotted[1];
+    const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(hostname);
+    if (!hex) return null;
+    const high = Number.parseInt(hex[1], 16);
+    const low = Number.parseInt(hex[2], 16);
+    if (!Number.isInteger(high) || !Number.isInteger(low)) return null;
+    return [
+      (high >> 8) & 0xff,
+      high & 0xff,
+      (low >> 8) & 0xff,
+      low & 0xff,
+    ].join('.');
   };
 
   const proxyErrorCode = (status) => {
