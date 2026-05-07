@@ -182,6 +182,32 @@ describe('API proxy routes', () => {
     );
   });
 
+  it('allows IPv4-mapped loopback API base URLs for local OpenAI-compatible providers', async () => {
+    const fetchMock = vi.fn((input: FetchInput, init?: FetchInit) => {
+      const url = String(input);
+      if (url.startsWith(baseUrl)) return realFetch(input, init);
+      return Promise.resolve(sseResponse('data: [DONE]\n\n'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await realFetch(`${baseUrl}/api/proxy/openai/stream`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: 'http://[::ffff:127.0.0.1]:11434/v1',
+        apiKey: 'sk-local',
+        model: 'llama-local',
+        messages: [{ role: 'user', content: 'hello' }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.text()).resolves.toContain('event: end');
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(
+      'http://[::ffff:7f00:1]:11434/v1/chat/completions',
+    );
+  });
+
   it('blocks private network API base URLs before proxying', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

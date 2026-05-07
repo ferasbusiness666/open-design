@@ -222,7 +222,7 @@
 
 ### 1 · لا نشحن وكيلاً، وكيلك كافٍ
 
-الـ daemon يمسح `PATH` بحثاً عن [`claude`](https://docs.anthropic.com/en/docs/claude-code) و [`codex`](https://github.com/openai/codex) و `devin` و [`cursor-agent`](https://www.cursor.com/cli) و [`gemini`](https://github.com/google-gemini/gemini-cli) و [`opencode`](https://opencode.ai/) و [`qwen`](https://github.com/QwenLM/qwen-code) و `qodercli` و [`copilot`](https://github.com/features/copilot/cli) و `hermes` و `kimi` و [`pi`](https://github.com/mariozechner/pi-ai) و [`kiro-cli`](https://kiro.dev) و [`vibe-acp`](https://github.com/mistralai/mistral-vibe) عند الإقلاع. ما يجده يصبح محرّك تصميم مرشّحاً — يُشغَّل عبر stdio بـ adapter لكل CLI، قابل للتبديل من الـ model picker. الإلهام من [`multica`](https://github.com/multica-ai/multica) و [`cc-switch`](https://github.com/farion1231/cc-switch). لا CLI مثبتة؟ وضع API هو نفس خط الأنابيب بدون spawn — اختر Anthropic أو متوافق مع OpenAI أو Azure OpenAI أو Google Gemini ويُعيد الـ daemon توجيه قطع SSE المُطبَّعة، مع رفض loopback / link-local / RFC1918 عند الحدّ.
+الـ daemon يمسح `PATH` بحثاً عن [`claude`](https://docs.anthropic.com/en/docs/claude-code) و [`codex`](https://github.com/openai/codex) و `devin` و [`cursor-agent`](https://www.cursor.com/cli) و [`gemini`](https://github.com/google-gemini/gemini-cli) و [`opencode`](https://opencode.ai/) و [`qwen`](https://github.com/QwenLM/qwen-code) و `qodercli` و [`copilot`](https://github.com/features/copilot/cli) و `hermes` و `kimi` و [`pi`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) و [`kiro-cli`](https://kiro.dev) و [`vibe-acp`](https://github.com/mistralai/mistral-vibe) عند الإقلاع. ما يجده يصبح محرّك تصميم مرشّحاً — يُشغَّل عبر stdio بـ adapter لكل CLI، قابل للتبديل من الـ model picker. الإلهام من [`multica`](https://github.com/multica-ai/multica) و [`cc-switch`](https://github.com/farion1231/cc-switch). لا CLI مثبتة؟ وضع API هو نفس خط الأنابيب بدون spawn — اختر Anthropic أو متوافق مع OpenAI أو Azure OpenAI أو Google Gemini ويُعيد الـ daemon توجيه قطع SSE المُطبَّعة، مع رفض loopback / link-local / RFC1918 عند الحدّ.
 
 ### 2 · الـ Skills ملفات، لا plugins
 
@@ -696,7 +696,7 @@ OD لا يقف عند الكود. نفس واجهة الـ chat التي تنت�
 
 [cd]: https://x.com/claudeai/status/2045156267690213649
 [ocod]: https://github.com/OpenCoworkAI/open-codesign
-[piai]: https://github.com/mariozechner/pi-ai
+[piai]: https://github.com/badlogic/pi-mono/tree/main/packages/ai
 [acd]: https://github.com/VoltAgent/awesome-claude-design
 [guizang]: https://github.com/op7418/guizang-ppt-skill
 [skill]: https://docs.anthropic.com/en/docs/claude-code/skills
@@ -722,7 +722,7 @@ OD لا يقف عند الكود. نفس واجهة الـ chat التي تنت�
 | Kilo | `kilo` | `acp-json-rpc` | `kilo acp` |
 | [Mistral Vibe CLI](https://github.com/mistralai/mistral-vibe) | `vibe-acp` | `acp-json-rpc` | `vibe-acp` |
 | DeepSeek TUI | `deepseek` | `plain` (raw stdout chunks) | `deepseek exec --auto [--model …] <prompt>` |
-| [Pi](https://github.com/mariozechner/pi-ai) | `pi` | `pi-rpc` (stdio JSON-RPC) | `pi --mode rpc [--model …] [--thinking …]` (البرومبت يُرسل كأمر RPC `prompt`) |
+| [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) | `pi` | `pi-rpc` (stdio JSON-RPC) | `pi --mode rpc [--model …] [--thinking …]` (البرومبت يُرسل كأمر RPC `prompt`) |
 | **BYOK متعدّد المزوّدين** | n/a | تطبيع SSE | `POST /api/proxy/{provider}/stream` → Anthropic / متوافق OpenAI / Azure OpenAI / Gemini؛ محمي SSRF ضد loopback / link-local / RFC1918 |
 
 إضافة CLI جديدة = مدخل واحد في [`apps/daemon/src/agents.ts`](apps/daemon/src/agents.ts). صيغة البثّ واحدة من `claude-stream-json` أو `qoder-stream-json` أو `copilot-stream-json` أو `json-event-stream` (مع `eventParser` لكل CLI) أو `acp-json-rpc` أو `pi-rpc` أو `plain`.
@@ -791,7 +791,7 @@ Issues و PRs و skills جديدة وأنظمة تصميم جديدة، كلّه
 شكراً لكلّ من ساعد في دفع Open Design للأمام — بكود، بوثائق، بملاحظات، بـ skills جديدة، بأنظمة تصميم جديدة، أو حتى بـ issue حادّة. كلّ مساهمة حقيقية تهمّ، والجدار أدناه أسهل طريقة لقول ذلك علناً.
 
 <a href="https://github.com/nexu-io/open-design/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=nexu-io/open-design&cache_bust=2026-05-06" alt="Open Design contributors" />
+  <img src="https://contrib.rocks/image?repo=nexu-io/open-design&cache_bust=2026-05-07" alt="Open Design contributors" />
 </a>
 
 إن شحنت أوّل PR — مرحباً. تصنيف [`good-first-issue`](https://github.com/nexu-io/open-design/labels/good-first-issue) هو نقطة الدخول.
@@ -808,9 +808,9 @@ Issues و PRs و skills جديدة وأنظمة تصميم جديدة، كلّه
 
 <a href="https://star-history.com/#nexu-io/open-design&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=nexu-io/open-design&type=Date&theme=dark&cache_bust=2026-05-06" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=nexu-io/open-design&type=Date&cache_bust=2026-05-06" />
-    <img alt="Open Design star history" src="https://api.star-history.com/svg?repos=nexu-io/open-design&type=Date&cache_bust=2026-05-06" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=nexu-io/open-design&type=Date&theme=dark&cache_bust=2026-05-07" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=nexu-io/open-design&type=Date&cache_bust=2026-05-07" />
+    <img alt="Open Design star history" src="https://api.star-history.com/svg?repos=nexu-io/open-design&type=Date&cache_bust=2026-05-07" />
   </picture>
 </a>
 
