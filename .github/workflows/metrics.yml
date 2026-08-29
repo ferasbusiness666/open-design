@@ -40,8 +40,8 @@ jobs:
           # lowlighter/metrics infers the token owner and treats the target as an org.
           template: repository
           base: ''
-          user: nexu-io
-          repo: open-design
+          user: ${{ github.repository_owner }}
+          repo: ${{ github.event.repository.name }}
 
           # Plugins. Anything that requires a personal token will silently no-op
           # without METRICS_TOKEN — the rest still produce a useful SVG.
